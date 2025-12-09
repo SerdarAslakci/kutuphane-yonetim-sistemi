@@ -17,7 +17,7 @@ width="300" height="300">
 - [Ekip Üyeleri](#ekip-üyeleri)
 
 # Genel Bakış
-**Kütüphane Uygulaması**, TypeScript ile yazılmış bir front-end ve C# (.NET) ile geliştirilmiş bir back-end içeren full-stack bir kütüphane yönetim uygulamasıdır. Kitaplar üzerinde CRUD işlemleri, ödünç alma/geri verme, kullanıcı yönetimi ve listeleme gibi temel kütüphane fonksiyonlarını sağlar.
+**Kütüphane Yönetim Sistemi**, TypeScript ile yazılmış bir front-end ve C# (.NET) ile geliştirilmiş bir back-end içeren full-stack bir kütüphane yönetim uygulamasıdır. Kitaplar üzerinde CRUD işlemleri, ödünç alma/geri verme, kullanıcı yönetimi ve listeleme gibi temel kütüphane fonksiyonlarını sağlar.
 
 
 
