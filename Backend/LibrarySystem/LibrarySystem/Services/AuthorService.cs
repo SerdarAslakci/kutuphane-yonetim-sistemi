@@ -1,0 +1,208 @@
+﻿using AutoMapper;
+using LibrarySystem.API.Dtos.AuthorDtos;
+using LibrarySystem.API.RepositoryInterfaces;
+using LibrarySystem.API.ServiceInterfaces;
+using LibrarySystem.Models.Models;
+using Microsoft.Extensions.Logging;
+
+namespace LibrarySystem.API.Services
+{
+    public class AuthorService : IAuthorService
+    {
+        private readonly IAuthorRepository _authorRepository;
+        private readonly ILoanRepository _loanRepository;
+        private readonly IMapper _mapper;
+        private readonly ILogger<AuthorService> _logger;
+
+        public AuthorService(IAuthorRepository authorRepository, IMapper mapper, ILogger<AuthorService> logger, ILoanRepository loanRepository)
+        {
+            _authorRepository = authorRepository;
+            _mapper = mapper;
+            _logger = logger;
+            _loanRepository = loanRepository;
+        }
+
+        public async Task<Author> AddAuthorAsync(CreateAuthorDto authorDto)
+        {
+            _logger.LogInformation("Yazar ekleme işlemi başlatıldı. İsim: {FirstName} {LastName}", authorDto?.FirstName, authorDto?.LastName);
+
+            if (authorDto == null)
+            {
+                _logger.LogWarning("Yazar ekleme başarısız: Yazar bilgisi (Dto) null geldi.");
+                throw new ArgumentNullException(nameof(authorDto), "Yazar bilgisi boş olamaz.");
+            }
+
+            if (string.IsNullOrWhiteSpace(authorDto.FirstName) || string.IsNullOrWhiteSpace(authorDto.LastName))
+            {
+                _logger.LogWarning("Yazar ekleme başarısız: Ad veya soyad boş geçilmiş.");
+                throw new ArgumentException("Yazarın adı ve soyadı boş bırakılamaz.");
+            }
+
+            bool exists = await _authorRepository.IsExistsAsync(authorDto.FirstName, authorDto.LastName);
+            if (exists)
+            {
+                _logger.LogWarning("Yazar ekleme başarısız: '{FirstName} {LastName}' zaten sistemde mevcut.", authorDto.FirstName, authorDto.LastName);
+                throw new InvalidOperationException("Bu yazar zaten sistemde mevcut.");
+            }
+
+            var author = _mapper.Map<Author>(authorDto);
+
+            await _authorRepository.AddAuthorAsync(author);
+
+            _logger.LogInformation("Yazar başarıyla eklendi. Yeni ID: {AuthorId}", author.Id);
+
+            return author;
+        }
+
+        public async Task<bool> IsExistsAsync(string? firstName, string? lastName)
+        {
+            return await _authorRepository.IsExistsAsync(firstName, lastName);
+        }
+
+        public async Task<Author?> GetByIdAsync(int id)
+        {
+            var author = await _authorRepository.GetByIdAsync(id);
+            if (author == null)
+            {
+                _logger.LogWarning("Yazar sorgulama başarısız: ID'si {Id} olan yazar bulunamadı.", id);
+                throw new KeyNotFoundException($"ID'si {id} olan yazar bulunamadı.");
+            }
+
+            return author;
+        }
+
+        public async Task<Author?> GetByNameAsync(string firstName, string lastName)
+        {
+            var author = await _authorRepository.GetByNameAsync(firstName, lastName);
+            if (author == null)
+            {
+                _logger.LogWarning("Yazar sorgulama başarısız: '{FirstName} {LastName}' isimli yazar bulunamadı.", firstName, lastName);
+                throw new KeyNotFoundException($"Adı '{firstName} {lastName}' olan yazar bulunamadı.");
+            }
+
+            return author;
+        }
+
+        public async Task<Author> GetOrCreateAsync(int? id, string? firstName, string? lastName)
+        {
+            if (id.HasValue)
+            {
+                return await GetByIdAsync(id.Value);
+            }
+
+            if (string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName))
+            {
+                _logger.LogWarning("GetOrCreate başarısız: İsim parametreleri eksik.");
+                throw new ArgumentException("Yazar adı ve soyadı boş olamaz.");
+            }
+
+            try
+            {
+                var existingAuthor = (await GetAuthorsByNameAsync(firstName, lastName)).FirstOrDefault();
+
+                if (existingAuthor != null)
+                {
+                    return existingAuthor;
+                }
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetAuthorsByNameAsync çağrılırken beklenmeyen bir hata oluştu.");
+                throw;
+            }
+
+            _logger.LogInformation("GetOrCreate: '{FirstName} {LastName}' bulunamadı, otomatik olarak yeni kayıt oluşturuluyor.", firstName, lastName);
+
+            return await AddAuthorAsync(new CreateAuthorDto
+            {
+                FirstName = firstName,
+                LastName = lastName
+            });
+        }
+        public async Task<IEnumerable<Author>> GetAllAuthorsAsync()
+        {
+            _logger.LogInformation("Service: Tüm yazarları getirme işlemi çağrıldı.");
+
+            return await _authorRepository.GetAllAuthorsAsync();
+        }
+
+        public async Task<bool> DeleteAuthorByIdAsync(int id)
+        {
+            _logger.LogInformation("Yazar silme işlemi başlatıldı. ID: {AuthorId}", id);
+
+            var author = await _authorRepository.GetByIdAsync(id);
+
+            if (author == null)
+            {
+                _logger.LogWarning("Silme başarısız: ID'si {Id} olan yazar bulunamadı.", id);
+                throw new KeyNotFoundException($"ID'si {id} olan yazar bulunamadı.");
+            }
+
+            var hasActiveLoans = await _loanRepository.HasActiveLoansByAuthor(id);
+
+            if (hasActiveLoans)
+            {
+                _logger.LogWarning("Silme başarısız: ID'si {Id} olan yazarın aktif ödünç kayıtları mevcut.", id);
+                throw new InvalidOperationException("Bu yazara ait ödünçte olan kitaplar bulunduğu için silme işlemi gerçekleştirilemez.");
+            }
+
+            await _authorRepository.DeleteAuthorByIdAsync(id);
+
+            _logger.LogInformation("Yazar başarıyla silindi. ID: {AuthorId}", id);
+
+            return true;
+        }
+
+        public async Task<IEnumerable<Author>> GetAuthorsByNameAsync(string firstName, string lastName)
+        {
+            _logger.LogInformation("Service: İsimle yazar arama işlemi çağrıldı. İsim: {FirstName} {LastName}", firstName, lastName);
+
+            var authors = await _authorRepository.GetAuthorsByNameAsync(firstName, lastName);
+
+            _logger.LogInformation("{AuthorCount} yazar bulundu.", authors.Count());
+
+            return authors;
+        }
+
+        public async Task<PaginatedAuthorResult<Author>> GetAllAuthorsPageableAsync(int page, int pageSize)
+        {
+            _logger.LogInformation("Sayfalı yazar listeleme işlemi başlatıldı. Sayfa: {Page}, Sayfa Boyutu: {PageSize}", page, pageSize);
+            var authors = await _authorRepository.GetAllAuthorsPageableAsync(page, pageSize);
+
+            _logger.LogInformation("Sayfalı yazar listeleme işlemi tamamlandı. Toplam Yazar: {TotalCount}, Toplam Sayfa: {TotalPages}", authors.TotalCount, authors.TotalPages);
+            return authors;
+        }
+
+        public async Task<Author?> UpdateAuthorAsync(int id, UpdateAuthorDto authorDto)
+        {
+            _logger.LogInformation("Yazar güncelleme işlemi başladı. ID: {Id}", id);
+
+
+            var author = await _authorRepository.IsExistsAsync(authorDto.FirstName, authorDto.LastName);
+
+            if (author)
+            {
+                _logger.LogWarning("Yazar güncelleme başarısız: '{FirstName} {LastName}' zaten sistemde mevcut.", authorDto.FirstName, authorDto.LastName);
+                throw new InvalidOperationException("Bu yazar zaten sistemde mevcut.");
+            }
+            var authorData = new Author
+            {
+                FirstName = authorDto.FirstName,
+                LastName = authorDto.LastName
+            };
+
+            var updatedAuthor = await _authorRepository.UpdateAuthorAsync(id, authorData);
+
+            if (updatedAuthor == null)
+            {
+                _logger.LogWarning("ID: {Id} olan yazar bulunamadı.", id);
+                throw new KeyNotFoundException($"ID: {id} olan yazar bulunamadı.");
+            }
+
+            _logger.LogInformation("Yazar başarıyla güncellendi. ID: {Id}", id);
+
+            return updatedAuthor;
+        }
+    }
+}
